@@ -12,6 +12,9 @@
 #define SPI_FLAG 1
 #define OUT_X_L 0x28
 
+// Define window size for readings to determine whether they are tremors
+#define WINDOW_SIZE 100
+
 // Define RGB LED pins
 DigitalOut greenLED(PG_13);
 DigitalOut redLED(PG_14);
@@ -71,13 +74,22 @@ void readGyroscope(SPI& spi, float& gx, float& gy, float& gz)
     printf("Gyroscope Values -> gx: %u, gy: %u, gz: %u\n", raw_gx, raw_gy, raw_gz);
 }
 
-bool isTremorDetected(float magnitude)
+bool isTremorDetected(float magnitudes[WINDOW_SIZE])
 {
     static bool timerStarted = false;
     static int cycleCount = 0;
     static Timer cycleTimer;
 
-    if (magnitude > THRESHOLD && !timerStarted)
+    int aboveThresholdCount = 0;
+    for (int i = 0; i < WINDOW_SIZE; i++)
+    {
+        if (magnitudes[i] > THRESHOLD)
+        {
+            aboveThresholdCount++;
+        }
+    }
+
+    if (aboveThresholdCount > WINDOW_SIZE / 2 && !timerStarted)
     {
         // Start of a cycle
         timerStarted = true;
@@ -85,7 +97,7 @@ bool isTremorDetected(float magnitude)
         cycleTimer.reset();
         cycleTimer.start();
     }
-    else if (magnitude <= THRESHOLD && timerStarted)
+    else if (aboveThresholdCount <= WINDOW_SIZE / 2 && timerStarted)
     {
         // End of a cycle
         timerStarted = false;
@@ -111,25 +123,36 @@ int main() {
     initializeGyroscope(spi);
 
     float gx, gy, gz;
+    float magnitudes[WINDOW_SIZE];
+    int currentIndex = 0;
 
     while(1) {
         readGyroscope(spi, gx, gy, gz);
-        float angularVelocity = sqrt(gx * gx + gy * gy + gz * gz);
+        float magnitude = sqrt(gx*gx + gy*gy + gz*gz);
+
+        // Store the magnitude in the array
+        magnitudes[currentIndex] = magnitude;
+        currentIndex++;
 
         // Add low pass filtering
 
-        // Check if a tremor is detected
-        if (isTremorDetected(angularVelocity)) {
-            printf("Tremor Detected!\n");
-            redLED = 1;
-            greenLED = 0;
-        } else {
-            printf("No Tremor\n");
-            redLED = 0;
-            greenLED = 1;
-        }
 
-        thread_sleep_for(100);
+        // If the window is filled, analyze the readings for tremors
+        if (currentIndex >= WINDOW_SIZE)
+        {
+            // Check if a tremor is detected
+            if (isTremorDetected(magnitudes)) {
+                printf("Tremor Detected!\n");
+                redLED = 1;
+                greenLED = 0;
+            } else {
+                printf("No Tremor\n");
+                redLED = 0;
+                greenLED = 1;
+            }
+            currentIndex = 0;
+        }
+        thread_sleep_for(10);
     }
 
     return 0;
