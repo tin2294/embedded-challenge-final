@@ -1,94 +1,75 @@
 #include <mbed.h>
+#include <stdio.h>
 #include <iostream>
+#include <iomanip>
 #include <vector>
 #include <cmath>
-#include <cstdlib> // for rand()
 
-// Function to read gyroscope data (simulated for demonstration)
-std::vector<std::vector<float>> readGyroscopeData() {
-    std::vector<std::vector<float>> gyro_data;
-    return gyro_data;
+#define CTRL_REG1 0x20
+#define CTRL_REG1_CONFIG 0b01'10'1'1'1'1
+#define CTRL_REG4 0x23
+#define CTRL_REG4_CONFIG 0b0'0'01'0'00'0
+#define SPI_FLAG 1
+#define OUT_X_L 0x28
+
+EventFlags flags;
+
+void spi_cb(int event)
+{
+    flags.set(SPI_FLAG);
 }
 
-// Function to calculate mean amplitude of signal
-float calculateMeanAmplitude(const std::vector<float>& signal) {
-    float peak_to_peak_amp = std::abs(*std::max_element(signal.begin(), signal.end()) -
-                                       *std::min_element(signal.begin(), signal.end()));
-    return peak_to_peak_amp / signal.size();
+#define SCALING_FACTOR (17.5f * 0.0174532925199432957692236907684886f / 1000.0f)
+
+void initializeGyroscope(SPI& spi)
+{
+    spi.format(8, 3);
+    spi.frequency(1'000'000);
+
+    uint8_t write_buf[2], read_buf[2];
+
+    // Configure CTRL_REG1 register
+    write_buf[0] = CTRL_REG1;
+    write_buf[1] = CTRL_REG1_CONFIG;
+    spi.transfer(write_buf, 2, read_buf, 2, spi_cb);
+    flags.wait_all(SPI_FLAG);
+
+    // Configure CTRL_REG4 register
+    write_buf[0] = CTRL_REG4;
+    write_buf[1] = CTRL_REG4_CONFIG;
+    spi.transfer(write_buf, 2, read_buf, 2, spi_cb);
+    flags.wait_all(SPI_FLAG);
 }
 
-// Function to calculate average regularity of signal
-float calculateAverageRegularity(const std::vector<float>& signal) {
-    float sum = 0.0f;
-    for (size_t i = 1; i < signal.size(); ++i) {
-        sum += std::abs(signal[i] - signal[i - 1]);
-    }
-    return sum / (signal.size() - 1);
-}
+void readGyroscope(SPI& spi, float& gx, float& gy, float& gz)
+{
+    uint8_t write_buf[7], read_buf[7];
+    write_buf[0] = OUT_X_L | 0x80 | 0x40;
+    spi.transfer(write_buf, 7, read_buf, 7, spi_cb);
+    flags.wait_all(SPI_FLAG);
 
-// Function to detect tremor based on gyroscope data
-bool detectTremor(const std::vector<float>& signal) {
-    // Calculate frequency of signal (assuming sampling rate of 125 Hz)
-    float sampling_rate = 125.0f;
-    float signal_size = static_cast<float>(signal.size());
-    float frequency = (signal_size / sampling_rate);
+    uint16_t raw_gx = (((uint16_t)read_buf[2]) << 8) | ((uint16_t) read_buf[1]);
+    uint16_t raw_gy = (((uint16_t)read_buf[4]) << 8) | ((uint16_t) read_buf[3]);
+    uint16_t raw_gz = (((uint16_t)read_buf[6]) << 8) | ((uint16_t) read_buf[5]);
 
-    // Calculate mean amplitude and average regularity
-    float mean_amplitude = calculateMeanAmplitude(signal);
-    float average_regularity = calculateAverageRegularity(signal);
+    gx = ((float) raw_gx) * SCALING_FACTOR;
+    gy = ((float) raw_gy) * SCALING_FACTOR;
+    gz = ((float) raw_gz) * SCALING_FACTOR;
 
-    // Define thresholds for amplitude and regularity
-    float amplitude_threshold = 0.1f; // Example threshold for mean amplitude
-    float regularity_threshold = 0.01f; // Example threshold for average regularity
-
-    // Check if frequency, mean amplitude, or average regularity exceed thresholds
-    if ((frequency >= 3.0f && frequency <= 6.0f) || mean_amplitude > amplitude_threshold || average_regularity < regularity_threshold) {
-        return true; // Tremor detected
-    }
-
-    return false; // No tremor detected
-}
-
-DigitalOut l1(LED1), l2(LED2);
-
-void toggle() {
-    l1 = !l1;
-    l2 = !l2;
+    printf("Gyroscope Values -> gx: %u, gy: %u, gz: %u\n", raw_gx, raw_gy, raw_gz);
 }
 
 int main() {
-    // Read gyroscope data (simulated for demonstration)
-    // std::vector<std::vector<float>> gyro_data = readGyroscopeData();
+    SPI spi(PF_9, PF_8, PF_7, PC_1, use_gpio_ssel);
+    initializeGyroscope(spi);
 
-    // Iterate over axes and detect tremor for each axis
-    // bool tremor_detected = false;
-    // for (int i = 0; i < 3; ++i) {
-    //     tremor_detected = detectTremor(gyro_data[i]);
-    //     if (tremor_detected) {
-    //         break; // Exit loop if tremor detected in any axis
-    //     }
-    // }
-
-    // bool tremor_detected = false;
-    // for (size_t i = 0; i < gyro_data.size(); ++i) {
-    //     tremor_detected = detectTremor(gyro_data[i]);
-    //     if (tremor_detected) {
-    //         break; // Exit loop if tremor detected in any axis
-    //     }
-    // }
-
-    // // Output whether tremor was detected
-    // if (tremor_detected) {
-    //     std::cout << "Tremor detected." << std::endl;
-    // } else {
-    //     std::cout << "No tremor detected." << std::endl;
-    // }
-
-    // return 0;
-    InterruptIn btn(BUTTON1, PullDown);
-    btn.rise(&toggle);
+    float gx, gy, gz;
 
     while(1) {
+        readGyroscope(spi, gx, gy, gz);
 
+        thread_sleep_for(100);
     }
+
+    return 0;
 }
