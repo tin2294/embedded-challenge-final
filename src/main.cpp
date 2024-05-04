@@ -120,16 +120,10 @@ int main() {
 
         // Check if a tremor is detected
         if (isTremorDetected(angularVelocity)) {
-            // Light up an LED or use any other visual indication
-            // to signal the presence of a tremor
-            // For example, you could use onboard LEDs like this:
-            // myled1 = 1; // turn the LED on
             printf("Tremor Detected!\n");
             redLED = 1;
             greenLED = 0;
         } else {
-            // Turn off the LED if no tremor is detected
-            // myled1 = 0; // turn the LED off
             printf("No Tremor\n");
             redLED = 0;
             greenLED = 1;
